@@ -15,19 +15,43 @@ const headers = {
 
 exports.handler = async (event, context) => {
     try {
+
         if (event.httpMethod == 'OPTIONS') {
             return {
                 headers: { ...headers, 'Allow': 'POST' },
                 statusCode: 204
             }
         }
+
         const { name } = JSON.parse(event.body)
-        const document = await createSession(name)
+        const sessionExists = await client.query(
+            q.Exists(q.Match(q.Index('sessions_by_name'), name))
+        )
+
+        let document
+        if (sessionExists) {
+            document = await client.query(
+                q.Get(q.Match(q.Index('sessions_by_name'), name))
+            )
+        } else {
+            document = await createSession(name)
+        }
+
+        const token = OT.generateToken(document.data.id, {
+            role: 'publisher',
+            data: `roomname=${document.data.name}`
+        })
+
         return {
             headers,
             statusCode: 200,
-            body: JSON.stringify(document)
+            body: JSON.stringify({
+                token: token,
+                sessionId: document.data.id,
+                apiKey: process.env.VONAGE_KEY
+            })
         }
+
     } catch (e) {
         console.error('Error', e)
         return { headers, statusCode: 500, body: 'Error: ' + e }
